@@ -1,0 +1,31 @@
+fastapi>=0.110
+uvicorn[standard]
+sqlalchemy[asyncio]>=2.0
+asyncpg
+alembic
+pydantic>=2.0
+pydantic-settings
+
+# AI
+anthropic>=0.40
+
+# Integrations
+# aioboto3 pins an exact aiobotocore, which in turn pins a narrow botocore
+# range. Left unpinned the resolver satisfies them by backtracking all the way
+# to 2017-era boto3/aiohttp, so both floors are required.
+boto3>=1.35
+aioboto3>=14
+aiohttp>=3.10
+google-cloud-logging
+httpx
+
+# Task queue
+celery[redis]
+redis
+
+# Security
+cryptography
+python-jose[cryptography]
+
+# Email
+resend

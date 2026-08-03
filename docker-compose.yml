@@ -1,0 +1,36 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: crxes-postgres
+    environment:
+      POSTGRES_USER: crxes
+      POSTGRES_PASSWORD: crxes
+      POSTGRES_DB: crxes
+    # Host port 5433 — 5432 is taken by another local project.
+    ports:
+      - "5433:5432"
+    volumes:
+      - crxes-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U crxes -d crxes"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: crxes-redis
+    # Host port 6380 — 6379 is taken by another local project.
+    ports:
+      - "6380:6379"
+    volumes:
+      - crxes-redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  crxes-pgdata:
+  crxes-redisdata:

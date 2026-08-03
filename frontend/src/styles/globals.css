@@ -1,0 +1,48 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * crxes design system tokens.
+ * Mirrored into tailwind.config.ts so both `var(--token)` and Tailwind
+ * utilities (bg-surface, text-agent-1, …) resolve to the same values.
+ */
+:root {
+  --bg-deep: #060a14;
+  --bg-surface: #0b1120;
+  --bg-elevated: #131b2e;
+  --border: #1e293b;
+
+  --text-primary: #e2e8f0;
+  --text-secondary: #94a3b8;
+  --text-muted: #475569;
+
+  --agent-1: #3b82f6; /* Log Parser */
+  --agent-2: #8b5cf6; /* Pattern Detector */
+  --agent-3: #f59e0b; /* Root Cause Analyzer */
+  --agent-4: #10b981; /* Bug Predictor */
+
+  --sev-critical: #ef4444;
+  --sev-high: #f59e0b;
+  --sev-medium: #3b82f6;
+  --sev-low: #10b981;
+}
+
+@layer base {
+  html {
+    color-scheme: dark;
+  }
+
+  body {
+    background-color: var(--bg-deep);
+    color: var(--text-secondary);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    color: var(--text-primary);
+  }
+}
