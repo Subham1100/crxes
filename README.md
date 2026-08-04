@@ -13,8 +13,8 @@ machine by another project, so crxes uses shifted ports:
 | -------- | ---- |
 | Postgres | 5433 |
 | Redis    | 6380 |
-| Backend  | 8001 |
-| Frontend | 3001 |
+| Backend  | 8002 |
+| Frontend | 3002 |
 
 ## Setup
 
@@ -28,7 +28,7 @@ python3.12 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 cp .env.example .env          # then fill in the secrets
 .venv/bin/alembic upgrade head
-.venv/bin/uvicorn main:app --reload --port 8001
+.venv/bin/uvicorn main:app --reload --port 8002
 
 # 3. Frontend
 cd frontend
@@ -37,8 +37,8 @@ cp .env.example .env.local    # then fill in the secrets
 npm run dev
 ```
 
-Verify: `curl localhost:8001/api/health/` → `{"status":"ok","database":"ok"}`,
-and http://localhost:3001 serves the landing page.
+Verify: `curl localhost:8002/api/health/` → `{"status":"ok","database":"ok"}`,
+and http://localhost:3002 serves the landing page.
 
 ## Auth
 
@@ -47,7 +47,7 @@ Email + password, owned by the backend. `POST /api/auth/signup` and
 an httpOnly `crxes_session` cookie holding a JWT signed with `NEXTAUTH_SECRET`.
 
 The cookie is host-only on `localhost`, so the browser sends it to both the API
-(:8001) and the Next server (:3001) — `lib/session.ts` forwards it back to
+(:8002) and the Next server (:3002) — `lib/session.ts` forwards it back to
 `/api/auth/me` to resolve the user in server components. In production set
 `SESSION_COOKIE_DOMAIN=.crxes.app` and `SESSION_COOKIE_SECURE=true`.
 
@@ -58,9 +58,46 @@ The cookie is host-only on `localhost`, so the browser sends it to both the API
 | `/api/auth/logout` | POST   | Clear the cookie                         |
 | `/api/auth/me`     | GET    | Current user, or 401                     |
 
-Pages: `/signup`, `/login`, and a placeholder `/dashboard` behind the session.
+Pages: `/signup`, `/login`, `/dashboard`, and `/analyze` behind the session.
 OAuth (GitHub, Google) lands in Phase 2 and will write to the same `users` table
 with `password_hash` left null — the provider buttons are on the forms, disabled.
+
+## Agent pipeline
+
+Four agents run in sequence on `claude-opus-5` with adaptive thinking. Only the
+Log Parser sees raw logs; each later agent receives the prose its predecessors
+produced, so a large paste is sent to the API once rather than four times.
+
+| # | Agent               | Input                    | Output                          |
+| - | ------------------- | ------------------------ | ------------------------------- |
+| 0 | Log Parser          | Normalized log entries   | Factual account: scope, grouped events, notable entries |
+| 1 | Pattern Detector    | Parser output            | Recurring patterns, correlations, trends, anomalies |
+| 2 | Root Cause Analyzer | Parser + patterns        | Ranked hypotheses with supporting and contrary evidence |
+| 3 | Bug Predictor       | All three                | Structured `Prediction` rows (JSON schema-constrained) |
+
+Pasted text is normalized to `NormalizedLogEntry` by `core/logs.py` — timestamp,
+level, source, message — with stack frames folded into the entry above them. The
+same shape is what the Phase 4 provider integrations will emit, so nothing
+downstream has to know where logs came from. Pastes get a per-user
+`provider="manual"` source and a `log_pulls` row, keeping the schema uniform.
+
+Phase 1 runs the pipeline **inline in the request** — `POST /api/analyses` blocks
+for a minute or two. `ANTHROPIC_EFFORT` defaults to `medium` for that reason;
+raise it once Phase 3 moves the run onto Celery and streams progress over SSE.
+The `on_agent_done` hook in `agents/pipeline.py` is the seam Phase 3 publishes
+from — today it checkpoints each agent's output onto the `analyses` row as it
+lands, so a mid-pipeline failure still shows the agents that did finish.
+
+| Route                          | Method | Purpose                                 |
+| ------------------------------ | ------ | --------------------------------------- |
+| `/api/analyses`                | POST   | Run the pipeline against pasted logs    |
+| `/api/analyses`                | GET    | Recent analyses for the current user    |
+| `/api/analyses/{id}`           | GET    | Agent outputs + predictions             |
+| `/api/analyses/{id}/logs`      | GET    | The normalized entries the agents saw   |
+
+A pipeline failure is persisted as `status="failed"` with `error_message` and
+returned as 200 — the partial agent output is worth showing, so the client
+renders the error from the row rather than from an HTTP status.
 
 ## Generating secrets
 
@@ -86,7 +123,7 @@ Postgres driver in the project.
 ## Build phases
 
 - **Phase 0 — scaffolding & contracts** ✅ two services, 5-table schema, design tokens, shared types
-- Phase 1 — agent pipeline, run synchronously against pasted logs
+- **Phase 1 — agent pipeline, run synchronously against pasted logs** ✅ four agents, log normalizer, `/analyze`
 - Phase 2 — NextAuth (GitHub + Google) + JWT verification
 - Phase 3 — Celery, Redis pub/sub, SSE streaming, live analysis UI
 - Phase 4 — Datadog / CloudWatch / Sentry integrations + source wizard

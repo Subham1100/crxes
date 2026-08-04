@@ -1,4 +1,4 @@
-export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8001";
+export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8002";
 
 /** Name of the httpOnly session cookie the API sets (backend/config.py). */
 export const SESSION_COOKIE = "crxes_session";
