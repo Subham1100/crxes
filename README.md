@@ -38,7 +38,29 @@ npm run dev
 ```
 
 Verify: `curl localhost:8001/api/health/` → `{"status":"ok","database":"ok"}`,
-and http://localhost:3001 shows the backend health inline.
+and http://localhost:3001 serves the landing page.
+
+## Auth
+
+Email + password, owned by the backend. `POST /api/auth/signup` and
+`/api/auth/login` hash/verify with bcrypt against `users.password_hash`, then set
+an httpOnly `crxes_session` cookie holding a JWT signed with `NEXTAUTH_SECRET`.
+
+The cookie is host-only on `localhost`, so the browser sends it to both the API
+(:8001) and the Next server (:3001) — `lib/session.ts` forwards it back to
+`/api/auth/me` to resolve the user in server components. In production set
+`SESSION_COOKIE_DOMAIN=.crxes.app` and `SESSION_COOKIE_SECURE=true`.
+
+| Route              | Method | Purpose                                  |
+| ------------------ | ------ | ---------------------------------------- |
+| `/api/auth/signup` | POST   | Create account, set session cookie       |
+| `/api/auth/login`  | POST   | Verify password, set session cookie      |
+| `/api/auth/logout` | POST   | Clear the cookie                         |
+| `/api/auth/me`     | GET    | Current user, or 401                     |
+
+Pages: `/signup`, `/login`, and a placeholder `/dashboard` behind the session.
+OAuth (GitHub, Google) lands in Phase 2 and will write to the same `users` table
+with `password_hash` left null — the provider buttons are on the forms, disabled.
 
 ## Generating secrets
 

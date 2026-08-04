@@ -21,6 +21,13 @@ class Settings(BaseSettings):
 
     # Auth — shared with the Next.js frontend for JWT verification
     nextauth_secret: str = ""
+    session_cookie_name: str = "crxes_session"
+    session_ttl_hours: int = 24 * 7
+    # Dev runs over plain http on localhost; set true behind TLS in production.
+    session_cookie_secure: bool = False
+    # Unset in dev so the cookie is host-only on `localhost` and reaches both
+    # the API (:8001) and the Next server (:3001). In production: ".crxes.app".
+    session_cookie_domain: str | None = None
 
     # Email
     resend_api_key: str = ""

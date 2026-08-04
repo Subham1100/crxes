@@ -1,6 +1,8 @@
 import Link from "next/link";
 
-import { GitHubMark, GoogleMark, PROVIDERS } from "@/components/logos";
+import { PROVIDERS } from "@/components/logos";
+import { Wordmark } from "@/components/wordmark";
+import { getSession } from "@/lib/session";
 import { AGENTS } from "@/lib/types";
 
 /* -------------------------------------------------------------------------- */
@@ -118,41 +120,21 @@ function Section({
   );
 }
 
-function Wordmark() {
-  return (
-    <Link href="/" className="flex items-center gap-2.5">
-      <span className="grid grid-cols-2 gap-[3px]" aria-hidden="true">
-        {[
-          "var(--agent-1)",
-          "var(--agent-2)",
-          "var(--agent-3)",
-          "var(--agent-4)",
-        ].map((c) => (
-          <span key={c} className="h-[7px] w-[7px] rounded-[2px]" style={{ backgroundColor: c }} />
-        ))}
-      </span>
-      <span className="font-mono text-title font-semibold tracking-tight text-primary">crxes</span>
-    </Link>
-  );
-}
-
-function OAuthButtons({ size = "lg" }: { size?: "lg" | "sm" }) {
+function AuthCta({ size = "lg" }: { size?: "lg" | "sm" }) {
   const pad = size === "lg" ? "px-5 py-3" : "px-4 py-2.5";
   return (
     <div className="flex flex-col gap-3 sm:flex-row">
       <Link
-        href="/login?provider=github"
-        className={`flex items-center justify-center gap-2.5 rounded-lg bg-[#e2e8f0] ${pad} font-medium text-[#0b1120] transition hover:bg-white`}
+        href="/signup"
+        className={`flex items-center justify-center rounded-lg bg-[#e2e8f0] ${pad} font-medium text-[#0b1120] transition hover:bg-white`}
       >
-        <GitHubMark className="h-[18px] w-[18px]" />
-        Continue with GitHub
+        Create your account
       </Link>
       <Link
-        href="/login?provider=google"
-        className={`flex items-center justify-center gap-2.5 rounded-lg border border-border bg-elevated ${pad} font-medium text-primary transition hover:border-[#334155] hover:bg-[#182238]`}
+        href="/login"
+        className={`flex items-center justify-center rounded-lg border border-border bg-elevated ${pad} font-medium text-primary transition hover:border-[#334155] hover:bg-[#182238]`}
       >
-        <GoogleMark className="h-[18px] w-[18px]" />
-        Continue with Google
+        Sign in
       </Link>
     </div>
   );
@@ -162,7 +144,7 @@ function OAuthButtons({ size = "lg" }: { size?: "lg" | "sm" }) {
 /* Sections                                                                    */
 /* -------------------------------------------------------------------------- */
 
-function Nav() {
+function Nav({ signedIn }: { signedIn: boolean }) {
   return (
     <header className="sticky top-0 z-20 border-b border-border bg-deep/80 backdrop-blur">
       <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
@@ -182,14 +164,19 @@ function Nav() {
           </a>
         </nav>
         <div className="flex items-center gap-4">
-          <Link href="/login" className="hidden text-secondary transition hover:text-primary sm:block">
-            Sign in
-          </Link>
+          {!signedIn && (
+            <Link
+              href="/login"
+              className="hidden text-secondary transition hover:text-primary sm:block"
+            >
+              Sign in
+            </Link>
+          )}
           <Link
-            href="/login"
+            href={signedIn ? "/dashboard" : "/signup"}
             className="rounded-lg bg-[#e2e8f0] px-4 py-2 font-medium text-[#0b1120] transition hover:bg-white"
           >
-            Start free
+            {signedIn ? "Dashboard" : "Start free"}
           </Link>
         </div>
       </div>
@@ -230,7 +217,7 @@ function Hero() {
           </p>
 
           <div className="mt-8">
-            <OAuthButtons />
+            <AuthCta />
           </div>
           <p className="mt-4 font-mono text-code text-muted">
             Free tier · no credit card · read-only credentials, encrypted at rest
@@ -457,7 +444,7 @@ function Pricing() {
             ))}
           </ul>
           <div className="mt-7">
-            <OAuthButtons size="sm" />
+            <AuthCta size="sm" />
           </div>
         </div>
 
@@ -506,7 +493,7 @@ function ClosingCta() {
         Connect a source and get your first forecast in about two minutes.
       </p>
       <div className="mt-8 flex justify-center">
-        <OAuthButtons />
+        <AuthCta />
       </div>
     </Section>
   );
@@ -527,10 +514,12 @@ function Footer() {
 
 /* -------------------------------------------------------------------------- */
 
-export default function LandingPage() {
+export default async function LandingPage() {
+  const user = await getSession();
+
   return (
     <>
-      <Nav />
+      <Nav signedIn={user !== null} />
       <main>
         <Hero />
         <HowItWorks />
