@@ -26,6 +26,8 @@ redis
 # Security
 cryptography
 python-jose[cryptography]
+bcrypt
+email-validator
 
 # Email
 resend

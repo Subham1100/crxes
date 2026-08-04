@@ -19,6 +19,8 @@ class User(Base):
 
     id: Mapped[UUID] = _pk()
     email: Mapped[str] = mapped_column(String(320), unique=True, nullable=False, index=True)
+    # Null for accounts created through an OAuth provider — they never set one.
+    password_hash: Mapped[str | None] = mapped_column(String(128))
     name: Mapped[str | None] = mapped_column(String(255))
     avatar_url: Mapped[str | None] = mapped_column(Text)
     plan: Mapped[str] = mapped_column(String(16), default="free", server_default="free")
