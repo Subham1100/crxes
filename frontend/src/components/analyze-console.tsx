@@ -1,10 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { AnalysisReport } from "@/components/analysis-report";
+import { CostEstimatePanel } from "@/components/cost-estimate";
 import { API_URL, errorMessage } from "@/lib/api";
-import { AGENTS, type AnalysisDetail } from "@/lib/types";
+import { AGENTS, type AnalysisDetail, type CostEstimate } from "@/lib/types";
+
+/** Long enough that typing doesn't fire a request per keystroke. */
+const ESTIMATE_DEBOUNCE_MS = 500;
 
 const AGENT_COLORS = ["var(--agent-1)", "var(--agent-2)", "var(--agent-3)", "var(--agent-4)"];
 
@@ -50,11 +54,63 @@ function RunningState() {
   );
 }
 
+/**
+ * Prices the paste as it is typed. The estimate is advisory, so a failed
+ * request leaves the last good number on screen rather than raising an error
+ * over something the user cannot act on.
+ */
+function useCostEstimate(text: string) {
+  const [estimate, setEstimate] = useState<CostEstimate | null>(null);
+  const [pending, setPending] = useState(false);
+  const inFlight = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    const logs = text.trim();
+    if (!logs) {
+      setEstimate(null);
+      setPending(false);
+      return;
+    }
+
+    setPending(true);
+    const timer = setTimeout(async () => {
+      inFlight.current?.abort();
+      const controller = new AbortController();
+      inFlight.current = controller;
+
+      try {
+        const res = await fetch(`${API_URL}/api/analyses/estimate`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ logs }),
+          signal: controller.signal,
+        });
+        if (res.ok) {
+          setEstimate((await res.json()) as CostEstimate);
+        } else {
+          // 422 means nothing parsed out of the paste — there is no cost to show.
+          setEstimate(null);
+        }
+      } catch {
+        // Aborted or unreachable; the superseding request owns the state now.
+      } finally {
+        if (!controller.signal.aborted) setPending(false);
+      }
+    }, ESTIMATE_DEBOUNCE_MS);
+
+    return () => clearTimeout(timer);
+  }, [text]);
+
+  return { estimate, estimating: pending };
+}
+
 export function AnalyzeConsole() {
   const [text, setText] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [analysis, setAnalysis] = useState<AnalysisDetail | null>(null);
+  const { estimate, estimating } = useCostEstimate(text);
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -140,6 +196,8 @@ export function AnalyzeConsole() {
           </p>
         )}
       </form>
+
+      {estimate && <CostEstimatePanel estimate={estimate} stale={estimating} />}
 
       {pending && <RunningState />}
       {analysis && <AnalysisReport analysis={analysis} />}

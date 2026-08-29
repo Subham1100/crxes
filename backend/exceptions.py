@@ -24,6 +24,13 @@ class MissingSecretError(ConfigError):
 class PipelineError(RuntimeError):
     """An agent failed. `agent_key` identifies which one, for the UI."""
 
+    #: Token usage from the agents that did complete before the failure, set by
+    #: `run_pipeline` on its way out. A run that dies at the third agent has
+    #: already spent money on the first two, and the analysis should say so.
+    #: A plain dict rather than a `PipelineResult` — `agents` imports this
+    #: module, so the type cannot be named here.
+    usage: dict[str, int] | None = None
+
     def __init__(self, agent_key: str, message: str) -> None:
         super().__init__(message)
         self.agent_key = agent_key

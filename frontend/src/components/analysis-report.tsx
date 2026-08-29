@@ -1,3 +1,4 @@
+import { formatUsd } from "@/components/cost-estimate";
 import { AGENTS, type AgentKey, type AnalysisDetail, type Severity } from "@/lib/types";
 
 const AGENT_COLOR: Record<AgentKey, string> = {
@@ -23,11 +24,12 @@ function outputFor(analysis: AnalysisDetail, key: AgentKey): string | null {
   }[key];
 }
 
-function Stat({ label, value }: { label: string; value: string }) {
+function Stat({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
     <div className="rounded-lg border border-border bg-surface px-4 py-3">
       <p className="font-mono text-label uppercase text-muted">{label}</p>
       <p className="mt-1 font-mono text-stat text-primary">{value}</p>
+      {hint && <p className="mt-0.5 font-mono text-label text-muted">{hint}</p>}
     </div>
   );
 }
@@ -100,7 +102,7 @@ export function AnalysisReport({ analysis }: { analysis: AnalysisDetail }) {
         </p>
       )}
 
-      <div className="grid gap-3 sm:grid-cols-4">
+      <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-5">
         <Stat label="Log lines" value={(analysis.log_line_count ?? 0).toLocaleString()} />
         <Stat label="Predictions" value={String(analysis.predictions.length)} />
         <Stat
@@ -110,6 +112,17 @@ export function AnalysisReport({ analysis }: { analysis: AnalysisDetail }) {
         <Stat
           label="Tokens"
           value={analysis.total_tokens_used?.toLocaleString() ?? "—"}
+          // The split is what makes the cost above legible: output bills at ~5x input.
+          hint={
+            analysis.input_tokens !== null && analysis.output_tokens !== null
+              ? `${analysis.input_tokens.toLocaleString()} in · ${analysis.output_tokens.toLocaleString()} out`
+              : undefined
+          }
+        />
+        <Stat
+          label="Cost"
+          value={analysis.cost_usd !== null ? formatUsd(analysis.cost_usd) : "—"}
+          hint={analysis.model ?? undefined}
         />
       </div>
 

@@ -32,12 +32,32 @@ AGENTS: tuple[tuple[str, str, str], ...] = (
 
 MAX_PREDICTIONS = 6
 
+#: How the raw sample reaches the Log Parser, and how each later agent receives
+#: its predecessors' prose. `core.cost` builds its estimate from these same two
+#: templates, so a change here changes the estimate with it.
+LOG_PROMPT_TEMPLATE = "Here is the log sample to analyze:\n\n```\n{log_text}\n```"
+SECTION_TEMPLATE = "## {agent_name} output\n\n{agent_output}"
+SECTION_SEPARATOR = "\n\n"
+
 
 @dataclass
 class PipelineResult:
     outputs: dict[str, str] = field(default_factory=dict)
     predictions: list[dict[str, Any]] = field(default_factory=list)
     tokens_used: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
+
+    def usage(self) -> dict[str, int]:
+        """The token counts, in the shape `core.cost.actual_cost_usd` takes."""
+        return {
+            "input_tokens": self.input_tokens,
+            "output_tokens": self.output_tokens,
+            "cache_read_tokens": self.cache_read_tokens,
+            "cache_write_tokens": self.cache_write_tokens,
+        }
 
 
 #: Called after each agent finishes: (index, key, name, output). Phase 3 uses
@@ -108,8 +128,22 @@ async def run_pipeline(log_text: str, on_agent_done: ProgressHook | None = None)
     """
     client = _client()
     result = PipelineResult()
+    try:
+        return await _run(client, result, log_text, on_agent_done)
+    except PipelineError as exc:
+        # The agents that finished before the failure were still billed.
+        exc.usage = result.usage()
+        raise
 
-    sections: list[str] = [f"Here is the log sample to analyze:\n\n```\n{log_text}\n```"]
+
+async def _run(
+    client: AsyncAnthropic,
+    result: PipelineResult,
+    log_text: str,
+    on_agent_done: ProgressHook | None,
+) -> PipelineResult:
+    """The loop itself, split out so `run_pipeline` can annotate a failure."""
+    sections: list[str] = [LOG_PROMPT_TEMPLATE.format(log_text=log_text)]
 
     for index, (key, name, system) in enumerate(AGENTS):
         if index > 0:
@@ -120,12 +154,26 @@ async def run_pipeline(log_text: str, on_agent_done: ProgressHook | None = None)
                 agent_key = AGENTS[i][0]
                 agent_output = result.outputs[agent_key]
 
-                section = f"## {agent_name} output\n\n{agent_output}"
+                section = SECTION_TEMPLATE.format(
+                    agent_name=agent_name, agent_output=agent_output
+                )
                 sections.append(section)
 
-        user = "\n\n".join(sections)
+        user = SECTION_SEPARATOR.join(sections)
         output_format = PredictorOutput if key == "predictor" else None
         response = await _call(client, key, system, user, output_format=output_format)
+
+        # Recorded before the checks below: a refusal or an empty response is
+        # billed like any other completion. Kept split by direction because
+        # output tokens cost ~5x input, so one total can't be priced. Thinking
+        # tokens are already inside `output_tokens`; the cache fields stay zero
+        # until the pipeline starts caching.
+        usage = response.usage
+        result.input_tokens += usage.input_tokens
+        result.output_tokens += usage.output_tokens
+        result.cache_read_tokens += usage.cache_read_input_tokens or 0
+        result.cache_write_tokens += usage.cache_creation_input_tokens or 0
+        result.tokens_used += usage.input_tokens + usage.output_tokens
 
         if response.stop_reason == "refusal":
             raise PipelineError(key, f"{name} declined to analyze this content")
@@ -135,7 +183,6 @@ async def run_pipeline(log_text: str, on_agent_done: ProgressHook | None = None)
             raise PipelineError(key, f"{name} returned an empty response")
 
         result.outputs[key] = output
-        result.tokens_used += response.usage.input_tokens + response.usage.output_tokens
 
         if on_agent_done:
             await on_agent_done(index, key, name, output)
