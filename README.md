@@ -14,15 +14,15 @@ machine by another project, so crxes uses shifted ports:
 | Postgres | 5433 | Docker                   |
 | Redis    | 6380 | Docker                   |
 | Backend  | 8001 | Docker                   |
-| Frontend | 3001 | Host (deploys to Vercel) |
+| Frontend | 3001 | Host                     |
 
 Inside the compose network the datastores use their standard ports —
 `postgres:5432` and `redis:6379`. Only the host-side ports are shifted.
 
 ## Setup
 
-The backend and its datastores run in Docker. The frontend runs on the host —
-it deploys to Vercel, and native Fast Refresh beats a bind-mounted container.
+The backend and its datastores run in Docker. The frontend runs on the host,
+where Fast Refresh is faster than it would be through a bind-mounted container.
 
 ### 1. Secrets
 

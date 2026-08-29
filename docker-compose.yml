@@ -40,9 +40,9 @@ services:
       # shifted host ports — these override the localhost values in .env.
       DATABASE_URL: postgresql+asyncpg://crxes:crxes@postgres:5432/crxes
       REDIS_URL: redis://redis:6379/0
-      # The frontend is not containerized — it runs on the host in dev and on
-      # Vercel in production — so it reaches the API through the published port
-      # like any other browser client. Add the Vercel origin here when deploying.
+      # The frontend is not containerized, so it reaches the API through the
+      # published port like any other browser client. Add the deployed origin
+      # here once the frontend is hosted somewhere.
       CORS_ORIGINS: http://localhost:3001
     ports:
       - "8001:8001"
