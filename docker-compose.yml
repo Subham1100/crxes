@@ -40,7 +40,9 @@ services:
       # shifted host ports — these override the localhost values in .env.
       DATABASE_URL: postgresql+asyncpg://crxes:crxes@postgres:5432/crxes
       REDIS_URL: redis://redis:6379/0
-      # The browser still calls the API from the host origin.
+      # The frontend is not containerized — it runs on the host in dev and on
+      # Vercel in production — so it reaches the API through the published port
+      # like any other browser client. Add the Vercel origin here when deploying.
       CORS_ORIGINS: http://localhost:3001
     ports:
       - "8001:8001"
@@ -61,28 +63,6 @@ services:
       # Generous: the first boot waits on `alembic upgrade head` before serving.
       retries: 30
       start_period: 10s
-
-  frontend:
-    build: ./frontend
-    container_name: crxes-frontend
-    env_file: ./frontend/.env.local
-    environment:
-      # Baked into the browser bundle, so it must be the HOST url — the browser
-      # resolves it outside the compose network and cannot see "backend".
-      NEXT_PUBLIC_API_URL: http://localhost:8001
-      # Read only by server components, which are inside the network.
-      INTERNAL_API_URL: http://backend:8001
-    ports:
-      - "3001:3001"
-    volumes:
-      - ./frontend:/app
-      # Anonymous volumes: node_modules is installed for linux at build time and
-      # .next is container-only, so neither host copy may shadow them.
-      - /app/node_modules
-      - /app/.next
-    depends_on:
-      backend:
-        condition: service_healthy
 
 volumes:
   crxes-pgdata:

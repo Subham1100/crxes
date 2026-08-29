@@ -2,7 +2,7 @@ import "server-only";
 
 import { cookies } from "next/headers";
 
-import { SERVER_API_URL, SESSION_COOKIE } from "@/lib/api";
+import { API_URL, SESSION_COOKIE } from "@/lib/api";
 import type { User } from "@/lib/types";
 
 /**
@@ -16,11 +16,7 @@ export async function getSession(): Promise<User | null> {
   if (!token) return null;
 
   try {
-<<<<<<< Updated upstream
     const res = await fetch(`${API_URL}/api/auth/me`, {
-=======
-    const res = await fetch(`${SERVER_API_URL}${path}`, {
->>>>>>> Stashed changes
       headers: { cookie: `${SESSION_COOKIE}=${token}` },
       cache: "no-store",
     });
