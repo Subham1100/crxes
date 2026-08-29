@@ -70,7 +70,7 @@ export function AuthForm({ mode }: { mode: Mode }) {
       router.push("/dashboard");
       router.refresh();
     } catch {
-      setError("Can't reach the API. Is the backend running on port 8001?");
+      setError("Can't reach the API. Is the backend running on port 8002?");
       setPending(false);
     }
   }
