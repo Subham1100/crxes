@@ -31,6 +31,39 @@ services:
       timeout: 5s
       retries: 10
 
+  backend:
+    build: ./backend
+    container_name: crxes-backend
+    env_file: ./backend/.env
+    environment:
+      # Inside the compose network services talk on their real ports, not the
+      # shifted host ports — these override the localhost values in .env.
+      DATABASE_URL: postgresql+asyncpg://crxes:crxes@postgres:5432/crxes
+      REDIS_URL: redis://redis:6379/0
+      # The frontend is not containerized, so it reaches the API through the
+      # published port like any other browser client. Add the deployed origin
+      # here once the frontend is hosted somewhere.
+      CORS_ORIGINS: http://localhost:3002
+    ports:
+      - "8002:8002"
+    volumes:
+      - ./backend:/app
+      # Anonymous volume: keeps the macOS .venv from shadowing the container's
+      # system-python install, which is where the deps actually live.
+      - /app/.venv
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "http://localhost:8002/api/health/"]
+      interval: 5s
+      timeout: 5s
+      # Generous: the first boot waits on `alembic upgrade head` before serving.
+      retries: 30
+      start_period: 10s
+
 volumes:
   crxes-pgdata:
   crxes-redisdata:
