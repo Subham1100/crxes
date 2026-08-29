@@ -6,6 +6,7 @@ agents finish. Phase 3 keeps these routes and moves the run onto Celery, with
 """
 
 import time
+from decimal import Decimal
 from typing import Annotated, Any
 from uuid import UUID
 
@@ -16,11 +17,13 @@ from sqlalchemy.orm import selectinload
 
 from agents import AGENTS, run_pipeline
 from api.deps import get_current_user
-from core import logs
+from config import settings
+from core import cost, logs, tokens
 from db.models import Analysis, LogPull, Prediction, Source, User
 from db.session import get_db
 from exceptions import AnalysisNotFound, NoLogLines, PipelineError
 from schemas.analyses import AnalysisDetailOut, AnalysisOut, AnalyzeRequest
+from schemas.costs import CostEstimateOut, EstimateRequest
 
 router = APIRouter(prefix="/api/analyses", tags=["analyses"])
 
@@ -46,6 +49,30 @@ async def _manual_source(db: AsyncSession, user: User) -> Source:
     return source
 
 
+def _record_cost(analysis: Analysis, usage: dict[str, int]) -> None:
+    """Write reported token usage, and what it cost, onto the analysis row.
+
+    `cost_usd` stays null for a model missing from the pricing catalog — a
+    missing price is worth showing as "unpriced", not as $0.00.
+    """
+    input_tokens = usage.get("input_tokens", 0)
+    output_tokens = usage.get("output_tokens", 0)
+
+    analysis.model = settings.anthropic_model
+    analysis.input_tokens = input_tokens
+    analysis.output_tokens = output_tokens
+    analysis.total_tokens_used = input_tokens + output_tokens
+
+    usd = cost.actual_cost_usd(
+        settings.anthropic_model,
+        input_tokens,
+        output_tokens,
+        usage.get("cache_read_tokens", 0),
+        usage.get("cache_write_tokens", 0),
+    )
+    analysis.cost_usd = Decimal(str(round(usd, 6))) if usd is not None else None
+
+
 async def _load(db: AsyncSession, user: User, analysis_id: UUID) -> Analysis:
     analysis = await db.scalar(
         select(Analysis)
@@ -55,6 +82,35 @@ async def _load(db: AsyncSession, user: User, analysis_id: UUID) -> Analysis:
     if analysis is None:
         raise AnalysisNotFound()
     return analysis
+
+
+@router.post("/estimate", response_model=CostEstimateOut)
+async def estimate_cost(
+    body: EstimateRequest,
+    user: Annotated[User, Depends(get_current_user)],
+) -> CostEstimateOut:
+    """Price a paste before running it.
+
+    Parses through the same `logs.normalize` / `logs.to_prompt` path the real
+    run uses, so the estimate is built from the exact text the parser would be
+    sent — truncation of an oversized paste included.
+    """
+    entries, dropped = logs.normalize(body.logs)
+    if not entries:
+        raise NoLogLines()
+
+    prompt = logs.to_prompt(entries)
+    log_tokens, counted = await tokens.count_tokens(prompt)
+    estimate = cost.estimate_pipeline_tokens(log_tokens, counted=counted)
+
+    return CostEstimateOut.of(
+        estimate,
+        cost.price_catalog(estimate),
+        log_line_count=len(entries),
+        dropped_lines=dropped,
+        raw_size_bytes=len(body.logs.encode()),
+        prompt_chars=len(prompt),
+    )
 
 
 @router.post("", response_model=AnalysisDetailOut, status_code=status.HTTP_201_CREATED)
@@ -101,6 +157,8 @@ async def create_analysis(
     except PipelineError as exc:
         analysis.status = "failed"
         analysis.error_message = str(exc)
+        # A run that died at the third agent still paid for the first two.
+        _record_cost(analysis, exc.usage or {})
         analysis.duration_ms = int((time.monotonic() - started) * 1000)
         await db.commit()
         # 200 with status="failed" — the partial agent output is worth showing,
@@ -112,7 +170,7 @@ async def create_analysis(
 
     analysis.status = "done"
     analysis.current_agent = len(AGENTS)
-    analysis.total_tokens_used = result.tokens_used
+    _record_cost(analysis, result.usage())
     analysis.duration_ms = int((time.monotonic() - started) * 1000)
     if dropped:
         analysis.error_message = f"{dropped:,} lines past the {logs.MAX_LINES:,}-line cap were dropped"

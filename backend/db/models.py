@@ -1,7 +1,17 @@
 from datetime import datetime
+from decimal import Decimal
 from uuid import UUID, uuid4
 
-from sqlalchemy import Boolean, ForeignKey, Integer, LargeBinary, String, Text, func
+from sqlalchemy import (
+    Boolean,
+    ForeignKey,
+    Integer,
+    LargeBinary,
+    Numeric,
+    String,
+    Text,
+    func,
+)
 from sqlalchemy.dialects.postgresql import JSONB, UUID as PgUUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -105,6 +115,14 @@ class Analysis(Base):
 
     log_line_count: Mapped[int | None] = mapped_column(Integer)
     total_tokens_used: Mapped[int | None] = mapped_column(Integer)
+    # Split by direction because output tokens cost ~5x input: a single total
+    # can't be priced after the fact. `model` records which model produced them,
+    # so an old run stays correctly priced when the configured model changes.
+    input_tokens: Mapped[int | None] = mapped_column(Integer)
+    output_tokens: Mapped[int | None] = mapped_column(Integer)
+    model: Mapped[str | None] = mapped_column(String(64))
+    # USD. Six decimal places — a cheap run lands in the tenths of a cent.
+    cost_usd: Mapped[Decimal | None] = mapped_column(Numeric(12, 6))
     duration_ms: Mapped[int | None] = mapped_column(Integer)
     error_message: Mapped[str | None] = mapped_column(Text)
 

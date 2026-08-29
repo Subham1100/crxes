@@ -52,6 +52,11 @@ class AnalysisOut(BaseModel):
     current_agent: int | None
     log_line_count: int | None
     total_tokens_used: int | None
+    input_tokens: int | None
+    output_tokens: int | None
+    model: str | None
+    #: What the run actually cost, in USD, from the reported token usage.
+    cost_usd: float | None
     duration_ms: int | None
     error_message: str | None
     created_at: str
@@ -66,6 +71,10 @@ class AnalysisOut(BaseModel):
             current_agent=a.current_agent,
             log_line_count=a.log_line_count,
             total_tokens_used=a.total_tokens_used,
+            input_tokens=a.input_tokens,
+            output_tokens=a.output_tokens,
+            model=a.model,
+            cost_usd=float(a.cost_usd) if a.cost_usd is not None else None,
             duration_ms=a.duration_ms,
             error_message=a.error_message,
             created_at=a.created_at.isoformat(),
