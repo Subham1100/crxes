@@ -31,6 +31,59 @@ services:
       timeout: 5s
       retries: 10
 
+  backend:
+    build: ./backend
+    container_name: crxes-backend
+    env_file: ./backend/.env
+    environment:
+      # Inside the compose network services talk on their real ports, not the
+      # shifted host ports — these override the localhost values in .env.
+      DATABASE_URL: postgresql+asyncpg://crxes:crxes@postgres:5432/crxes
+      REDIS_URL: redis://redis:6379/0
+      # The browser still calls the API from the host origin.
+      CORS_ORIGINS: http://localhost:3002
+    ports:
+      - "8002:8002"
+    volumes:
+      - ./backend:/app
+      # Anonymous volume: keeps the macOS .venv from shadowing the container's
+      # system-python install, which is where the deps actually live.
+      - /app/.venv
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "http://localhost:8002/api/health/"]
+      interval: 5s
+      timeout: 5s
+      # Generous: the first boot waits on `alembic upgrade head` before serving.
+      retries: 30
+      start_period: 10s
+
+  frontend:
+    build: ./frontend
+    container_name: crxes-frontend
+    env_file: ./frontend/.env.local
+    environment:
+      # Baked into the browser bundle, so it must be the HOST url — the browser
+      # resolves it outside the compose network and cannot see "backend".
+      NEXT_PUBLIC_API_URL: http://localhost:8002
+      # Read only by server components, which are inside the network.
+      INTERNAL_API_URL: http://backend:8002
+    ports:
+      - "3002:3002"
+    volumes:
+      - ./frontend:/app
+      # Anonymous volumes: node_modules is installed for linux at build time and
+      # .next is container-only, so neither host copy may shadow them.
+      - /app/node_modules
+      - /app/.next
+    depends_on:
+      backend:
+        condition: service_healthy
+
 volumes:
   crxes-pgdata:
   crxes-redisdata:
