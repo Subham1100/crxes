@@ -11,6 +11,7 @@ import bcrypt
 from jose import JWTError, jwt
 
 from config import settings
+from exceptions import MissingSecretError
 
 ALGORITHM = "HS256"
 
@@ -33,9 +34,10 @@ def verify_password(password: str, password_hash: str) -> bool:
 
 def _secret() -> str:
     if not settings.nextauth_secret:
-        raise RuntimeError(
-            "NEXTAUTH_SECRET is empty — generate one with `openssl rand -base64 32` "
-            "and set it in backend/.env and frontend/.env.local (identical values)."
+        raise MissingSecretError(
+            "NEXTAUTH_SECRET",
+            "generate one with `openssl rand -base64 32` and set it in backend/.env "
+            "and frontend/.env.local (identical values).",
         )
     return settings.nextauth_secret
 

@@ -9,108 +9,24 @@ import time
 from typing import Annotated, Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from agents import AGENTS, PipelineError, run_pipeline
+from agents import AGENTS, run_pipeline
 from api.deps import get_current_user
 from core import logs
 from db.models import Analysis, LogPull, Prediction, Source, User
 from db.session import get_db
+from exceptions import AnalysisNotFound, NoLogLines, PipelineError
+from schemas.analyses import AnalysisDetailOut, AnalysisOut, AnalyzeRequest
 
 router = APIRouter(prefix="/api/analyses", tags=["analyses"])
 
 #: Pasted logs still get a Source row so the schema stays uniform — one manual
 #: source per user, reused across every paste.
 MANUAL_SOURCE_NAME = "Pasted logs"
-
-
-class AnalyzeRequest(BaseModel):
-    logs: str = Field(min_length=1, max_length=logs.MAX_BYTES)
-
-
-class PredictionOut(BaseModel):
-    id: str
-    analysis_id: str
-    title: str
-    severity: str
-    description: str | None
-    confidence: int | None
-    eta: str | None
-    impact: str | None
-    root_cause: str | None
-    recommended_action: str | None
-    was_accurate: bool | None
-    feedback_note: str | None
-    created_at: str
-
-    @classmethod
-    def of(cls, p: Prediction) -> "PredictionOut":
-        return cls(
-            id=str(p.id),
-            analysis_id=str(p.analysis_id),
-            title=p.title,
-            severity=p.severity,
-            description=p.description,
-            confidence=p.confidence,
-            eta=p.eta,
-            impact=p.impact,
-            root_cause=p.root_cause,
-            recommended_action=p.recommended_action,
-            was_accurate=p.was_accurate,
-            feedback_note=p.feedback_note,
-            created_at=p.created_at.isoformat(),
-        )
-
-
-class AnalysisOut(BaseModel):
-    id: str
-    source_id: str | None
-    log_pull_id: str | None
-    status: str
-    current_agent: int | None
-    log_line_count: int | None
-    total_tokens_used: int | None
-    duration_ms: int | None
-    error_message: str | None
-    created_at: str
-
-    @classmethod
-    def of(cls, a: Analysis) -> "AnalysisOut":
-        return cls(
-            id=str(a.id),
-            source_id=str(a.source_id) if a.source_id else None,
-            log_pull_id=str(a.log_pull_id) if a.log_pull_id else None,
-            status=a.status,
-            current_agent=a.current_agent,
-            log_line_count=a.log_line_count,
-            total_tokens_used=a.total_tokens_used,
-            duration_ms=a.duration_ms,
-            error_message=a.error_message,
-            created_at=a.created_at.isoformat(),
-        )
-
-
-class AnalysisDetailOut(AnalysisOut):
-    agent_parser_output: str | None
-    agent_pattern_output: str | None
-    agent_rootcause_output: str | None
-    agent_predictor_output: str | None
-    predictions: list[PredictionOut]
-
-    @classmethod
-    def of(cls, a: Analysis) -> "AnalysisDetailOut":
-        return cls(
-            **AnalysisOut.of(a).model_dump(),
-            agent_parser_output=a.agent_parser_output,
-            agent_pattern_output=a.agent_pattern_output,
-            agent_rootcause_output=a.agent_rootcause_output,
-            agent_predictor_output=a.agent_predictor_output,
-            predictions=[PredictionOut.of(p) for p in a.predictions],
-        )
 
 
 async def _manual_source(db: AsyncSession, user: User) -> Source:
@@ -137,8 +53,7 @@ async def _load(db: AsyncSession, user: User, analysis_id: UUID) -> Analysis:
         .options(selectinload(Analysis.predictions))
     )
     if analysis is None:
-        # Scoped by user_id, so someone else's analysis is a 404, not a 403.
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Analysis not found")
+        raise AnalysisNotFound()
     return analysis
 
 
@@ -150,10 +65,7 @@ async def create_analysis(
 ) -> AnalysisDetailOut:
     entries, dropped = logs.normalize(body.logs)
     if not entries:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="No log lines found in that input",
-        )
+        raise NoLogLines()
 
     source = await _manual_source(db, user)
     log_pull = LogPull(

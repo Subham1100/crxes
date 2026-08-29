@@ -5,17 +5,19 @@ streams the same per-agent steps over SSE, so the callback below exists to give
 that phase a seam it can already write into.
 """
 
-import json
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
 import anthropic
-from anthropic import AsyncAnthropic
+from anthropic import AsyncAnthropic, transform_schema
+from pydantic import BaseModel, ValidationError
 
 from agents import prompts
 from config import settings
+from exceptions import PipelineError
+from schemas.agents import PredictorOutput
 
 log = logging.getLogger(__name__)
 
@@ -29,51 +31,6 @@ AGENTS: tuple[tuple[str, str, str], ...] = (
 )
 
 MAX_PREDICTIONS = 6
-
-#: Mirrors the Prediction columns in db/models.py. Structured outputs reject
-#: numeric bounds, so `confidence` is clamped after parsing instead.
-_PREDICTION_SCHEMA: dict[str, Any] = {
-    "type": "object",
-    "properties": {
-        "predictions": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "title": {"type": "string"},
-                    "severity": {"type": "string", "enum": ["critical", "high", "medium", "low"]},
-                    "description": {"type": "string"},
-                    "confidence": {"type": "integer"},
-                    "eta": {"type": "string"},
-                    "impact": {"type": "string"},
-                    "root_cause": {"type": "string"},
-                    "recommended_action": {"type": "string"},
-                },
-                "required": [
-                    "title",
-                    "severity",
-                    "description",
-                    "confidence",
-                    "eta",
-                    "impact",
-                    "root_cause",
-                    "recommended_action",
-                ],
-                "additionalProperties": False,
-            },
-        }
-    },
-    "required": ["predictions"],
-    "additionalProperties": False,
-}
-
-
-class PipelineError(RuntimeError):
-    """An agent failed. `agent_key` identifies which one, for the UI."""
-
-    def __init__(self, agent_key: str, message: str) -> None:
-        super().__init__(message)
-        self.agent_key = agent_key
 
 
 @dataclass
@@ -105,11 +62,17 @@ async def _call(
     agent_key: str,
     system: str,
     user: str,
-    response_schema: dict[str, Any] | None = None,
+    output_format: type[BaseModel] | None = None,
 ):
     output_config: dict[str, Any] = {"effort": settings.anthropic_effort}
-    if response_schema is not None:
-        output_config["format"] = {"type": "json_schema", "schema": response_schema}
+    if output_format is not None:
+        # `transform_schema` is what messages.parse() sends: it drops the
+        # keywords structured outputs rejects (numeric bounds and the like)
+        # into descriptions the model can still read.
+        output_config["format"] = {
+            "type": "json_schema",
+            "schema": transform_schema(output_format),
+        }
 
     try:
         return await client.messages.create(
@@ -128,40 +91,12 @@ async def _call(
 
 
 def _parse_predictions(raw: str) -> list[dict[str, Any]]:
-    """Coerce the predictor's JSON into rows the Prediction model accepts."""
+    """Validate the predictor's JSON into rows the Prediction model accepts."""
     try:
-        payload = json.loads(raw)
-    except json.JSONDecodeError as exc:
+        parsed = PredictorOutput.model_validate_json(raw)
+    except ValidationError as exc:
         raise PipelineError("predictor", "Bug Predictor returned malformed JSON") from exc
-
-    out: list[dict[str, Any]] = []
-    for item in payload.get("predictions", [])[:MAX_PREDICTIONS]:
-        title = str(item.get("title", "")).strip()
-        if not title:
-            continue
-        severity = str(item.get("severity", "")).lower()
-        if severity not in ("critical", "high", "medium", "low"):
-            severity = "medium"
-        try:
-            confidence = max(0, min(100, int(item.get("confidence", 0))))
-        except (TypeError, ValueError):
-            confidence = 0
-        eta = str(item.get("eta") or "").strip()
-        out.append(
-            {
-                "title": title,
-                "severity": severity,
-                "description": item.get("description") or None,
-                "confidence": confidence,
-                # Column is String(64) — the model is asked for a short phrase,
-                # but a long one shouldn't fail the whole insert.
-                "eta": eta[:64] or None,
-                "impact": item.get("impact") or None,
-                "root_cause": item.get("root_cause") or None,
-                "recommended_action": item.get("recommended_action") or None,
-            }
-        )
-    return out
+    return parsed.rows(MAX_PREDICTIONS)
 
 
 async def run_pipeline(log_text: str, on_agent_done: ProgressHook | None = None) -> PipelineResult:
@@ -179,13 +114,18 @@ async def run_pipeline(log_text: str, on_agent_done: ProgressHook | None = None)
     for index, (key, name, system) in enumerate(AGENTS):
         if index > 0:
             # Hand forward every prior agent's output, labelled.
-            sections = [
-                f"## {AGENTS[i][1]} output\n\n{result.outputs[AGENTS[i][0]]}" for i in range(index)
-            ]
+            sections = []
+            for i in range(index):
+                agent_name = AGENTS[i][1]
+                agent_key = AGENTS[i][0]
+                agent_output = result.outputs[agent_key]
+
+                section = f"## {agent_name} output\n\n{agent_output}"
+                sections.append(section)
 
         user = "\n\n".join(sections)
-        schema = _PREDICTION_SCHEMA if key == "predictor" else None
-        response = await _call(client, key, system, user, response_schema=schema)
+        output_format = PredictorOutput if key == "predictor" else None
+        response = await _call(client, key, system, user, output_format=output_format)
 
         if response.stop_reason == "refusal":
             raise PipelineError(key, f"{name} declined to analyze this content")
