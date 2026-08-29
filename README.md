@@ -32,13 +32,7 @@ cp backend/.env.example backend/.env
 cp frontend/.env.example frontend/.env.local
 ```
 
-# 2. Backend
-cd backend
-python3.12 -m venv .venv
-.venv/bin/pip install -r requirements.txt
-cp .env.example .env          # then fill in the secrets
-.venv/bin/alembic upgrade head
-.venv/bin/uvicorn main:app --reload --port 8002
+### 2. Backend, Postgres, Redis
 
 ```bash
 docker compose up --build
@@ -84,7 +78,7 @@ cd backend
 python3.12 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 .venv/bin/alembic upgrade head
-.venv/bin/uvicorn main:app --reload --port 8001
+.venv/bin/uvicorn main:app --reload --port 8002
 ```
 
 Start only the datastores first with `docker compose up -d postgres redis`. The
