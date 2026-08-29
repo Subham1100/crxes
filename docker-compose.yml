@@ -41,9 +41,9 @@ services:
       DATABASE_URL: postgresql+asyncpg://crxes:crxes@postgres:5432/crxes
       REDIS_URL: redis://redis:6379/0
       # The browser still calls the API from the host origin.
-      CORS_ORIGINS: http://localhost:3002
+      CORS_ORIGINS: http://localhost:3001
     ports:
-      - "8002:8002"
+      - "8001:8001"
     volumes:
       - ./backend:/app
       # Anonymous volume: keeps the macOS .venv from shadowing the container's
@@ -55,7 +55,7 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-fs", "http://localhost:8002/api/health/"]
+      test: ["CMD", "curl", "-fs", "http://localhost:8001/api/health/"]
       interval: 5s
       timeout: 5s
       # Generous: the first boot waits on `alembic upgrade head` before serving.
@@ -69,11 +69,11 @@ services:
     environment:
       # Baked into the browser bundle, so it must be the HOST url — the browser
       # resolves it outside the compose network and cannot see "backend".
-      NEXT_PUBLIC_API_URL: http://localhost:8002
+      NEXT_PUBLIC_API_URL: http://localhost:8001
       # Read only by server components, which are inside the network.
-      INTERNAL_API_URL: http://backend:8002
+      INTERNAL_API_URL: http://backend:8001
     ports:
-      - "3002:3002"
+      - "3001:3001"
     volumes:
       - ./frontend:/app
       # Anonymous volumes: node_modules is installed for linux at build time and

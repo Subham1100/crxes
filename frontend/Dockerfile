@@ -15,7 +15,7 @@ RUN npm ci
 
 COPY . .
 
-EXPOSE 3002
+EXPOSE 3001
 
 # -H 0.0.0.0 so the dev server is reachable from outside the container.
 CMD ["npm", "run", "dev", "--", "-H", "0.0.0.0"]

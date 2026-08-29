@@ -24,8 +24,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-EXPOSE 8002
+EXPOSE 8001
 
 # Migrations run on every boot so `docker compose up` needs no second command.
 # `alembic upgrade head` is a no-op when the schema is already current.
-CMD ["sh", "-c", "alembic upgrade head && exec uvicorn main:app --reload --host 0.0.0.0 --port 8002"]
+CMD ["sh", "-c", "alembic upgrade head && exec uvicorn main:app --reload --host 0.0.0.0 --port 8001"]
