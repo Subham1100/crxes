@@ -1,5 +1,7 @@
 fastapi>=0.110
 uvicorn[standard]
+# Multipart form parsing, for the log-file upload route.
+python-multipart
 sqlalchemy[asyncio]>=2.0
 asyncpg
 alembic

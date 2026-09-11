@@ -8,7 +8,8 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field
 
-from core import logs, pricing
+from core import pricing
+from ingest.limits import MAX_PASTE_BYTES
 
 if TYPE_CHECKING:
     # Type-only: `core.cost` reaches into `agents.pipeline`, which imports this
@@ -17,7 +18,7 @@ if TYPE_CHECKING:
 
 
 class EstimateRequest(BaseModel):
-    logs: str = Field(min_length=1, max_length=logs.MAX_BYTES)
+    logs: str = Field(min_length=1, max_length=MAX_PASTE_BYTES)
 
 
 class StageCostOut(BaseModel):

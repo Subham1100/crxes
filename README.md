@@ -114,6 +114,81 @@ Pages: `/signup`, `/login`, `/dashboard`, and `/analyze` behind the session.
 OAuth (GitHub, Google) lands in Phase 2 and will write to the same `users` table
 with `password_hash` left null — the provider buttons are on the forms, disabled.
 
+## Ingest (Phase A)
+
+```
+files ──▶ 1 detect ──▶ 2 parse ──▶ 3 normalize ──▶ 4 redact ──▶ Entry[]
+```
+
+`ingest/` turns pasted text or uploaded files into `Entry` objects. Everything
+after it — enrichment, correlation, digest, root-cause localization — consumes
+`Entry` and never touches raw text again. Adding a log format means adding a
+parser; no later stage learns about it. Deterministic and side-effect free: same
+bytes in, same entries out, no network and no model.
+
+**Detect** (`ingest/detect.py`) scores every candidate format over the same
+sample and takes the highest, rather than first-match — Postgres and plain ISO
+lines share a prefix, and CRI is a timestamp wrapped around anything. It returns
+a confidence, and the UI shows it as the guess it is. A user override
+short-circuits it.
+
+**Parse** (`ingest/parsers/`) — one module per format:
+
+| Format | Source | What it gives correlation |
+| ------ | ------ | ------------------------- |
+| `json` | OTLP (envelope + flat), GCP, Datadog, ECS, bunyan/pino, Docker | real `trace_id`/`span_id` |
+| `plain` | anything human-readable | bracketed logger as the service |
+| `logfmt` | Go, Heroku, Grafana stack | `trace_id`, `request_id` |
+| `clf` | nginx, Apache, ALB | status, latency, `X-Request-ID` |
+| `postgres` | Postgres server log | **backend PID** — one PID is one session |
+| `syslog` / `syslog5424` | daemons, journald | tag, PID, structured data |
+| `cri` | `kubectl logs`, Docker | stream, rejoined partial lines |
+
+Unmapped fields are kept in `attributes` rather than dropped — the field no
+parser has heard of is routinely the one that identifies the request.
+
+**Normalize** (`ingest/normalize.py`) makes timestamps comparable, which
+everything downstream depends on. Naive times resolve against the file's
+declared timezone; missing ones carry forward, marked `time_source="carried"`.
+Clock skew is **detected and reported, not corrected** — two files covering
+different windows look identical to two hosts disagreeing about the time, and
+only shared correlation anchors tell them apart. Supply `offset_seconds` on a
+file to correct it yourself.
+
+**Redact** (`ingest/redact.py`) runs after parsing, so a `password=` field is
+removed by key rather than by guessing at a blob. `trace_id`, `span_id` and
+`correlation_keys` are never touched — they are what later stages join on. Card
+numbers are Luhn-checked so order IDs survive, and IPs are kept by default
+because they are a correlation key more often than they are PII.
+
+| Route                   | Method | Purpose                                      |
+| ----------------------- | ------ | -------------------------------------------- |
+| `/api/ingest/formats`   | GET    | Formats and roles, for the upload UI pickers  |
+| `/api/ingest/preview`   | POST   | Run the phase over JSON-supplied files        |
+| `/api/ingest/upload`    | POST   | Same, multipart, for real dumps               |
+
+Preview persists nothing and calls no model, so the UI can re-run it on every
+change to the file list — rename a service, fix a timezone, flip a rule.
+
+**Throughput** is ~20k lines/s single-threaded (~2.5 MB/s), measured over 200k
+lines. Redaction is about two thirds of that: one regex alternation scan per
+entry, which is already the floor after the containment shortcut in
+`redact_entry` cut it from one scan per *field*. Fine for the paste path;
+`MAX_UPLOAD_LINES` (500k) is ~25s and belongs on the Celery worker rather than
+in a request.
+
+### Tests
+
+```bash
+cd backend
+pip install -r requirements.txt -r requirements-dev.txt
+pytest                    # 152 tests, ~1s
+ruff check .
+```
+
+No database or API key needed — the ingest phase is pure, and the route tests
+override the auth dependency.
+
 ## Agent pipeline
 
 Four agents run in sequence on `claude-opus-5` with adaptive thinking. Only the
@@ -127,11 +202,14 @@ produced, so a large paste is sent to the API once rather than four times.
 | 2 | Root Cause Analyzer | Parser + patterns        | Ranked hypotheses with supporting and contrary evidence |
 | 3 | Bug Predictor       | All three                | Structured `Prediction` rows (JSON schema-constrained) |
 
-Pasted text is normalized to `NormalizedLogEntry` by `core/logs.py` — timestamp,
-level, source, message — with stack frames folded into the entry above them. The
-same shape is what the Phase 4 provider integrations will emit, so nothing
-downstream has to know where logs came from. Pastes get a per-user
+Pasted text reaches the agents through [Ingest](#ingest-phase-a), which produces
+the `Entry` shape stored on `log_pulls.normalized_logs`. Pastes get a per-user
 `provider="manual"` source and a `log_pulls` row, keeping the schema uniform.
+
+`ingest/prompt.py` renders those entries as a transcript for the agents. That is
+a stopgap: once the digest and correlation stages land, the agents read a digest
+and a handful of reconstructed flows instead, which is what takes the token count
+down by orders of magnitude.
 
 Phase 1 runs the pipeline **inline in the request** — `POST /api/analyses` blocks
 for a minute or two. `ANTHROPIC_EFFORT` defaults to `medium` for that reason;
@@ -244,6 +322,17 @@ does the same thing, since the entrypoint upgrades before starting uvicorn.
 
 - **Phase 0 — scaffolding & contracts** ✅ two services, 5-table schema, design tokens, shared types
 - **Phase 1 — agent pipeline, run synchronously against pasted logs** ✅ four agents, log normalizer, `/analyze`
+- **Phase A — ingest** ✅ multi-file upload, format detection, 8 parsers, timezone/skew normalization, redaction
+
+The phases below are the original build order. Phases A–E are the trace-
+reconstruction track that replaces the "paste and ask a model" approach with a
+deterministic engine; the agents become the last step of it rather than the
+whole of it.
+
+- Phase B — enrich: Drain3 template mining, numeric + entity-key extraction
+- Phase C — correlate: the L1–L5 ladder → flows with confidence and evidence
+- Phase D — digest + diagnose: per-service feature timeseries, root-cause localization
+- Phase E — render: swimlane timeline, evidence panel, one summarizing agent
 - Phase 2 — NextAuth (GitHub + Google) + JWT verification
 - Phase 3 — Celery, Redis pub/sub, SSE streaming, live analysis UI
 - Phase 4 — Datadog / CloudWatch / Sentry integrations + source wizard

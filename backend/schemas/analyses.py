@@ -2,12 +2,12 @@
 
 from pydantic import BaseModel, Field
 
-from core import logs
 from db.models import Analysis, Prediction
+from ingest.limits import MAX_PASTE_BYTES
 
 
 class AnalyzeRequest(BaseModel):
-    logs: str = Field(min_length=1, max_length=logs.MAX_BYTES)
+    logs: str = Field(min_length=1, max_length=MAX_PASTE_BYTES)
 
 
 class PredictionOut(BaseModel):

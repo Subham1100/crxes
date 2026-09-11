@@ -45,13 +45,134 @@ export interface Source {
   created_at: string;
 }
 
+/** Canonical severities, least → most severe (backend/ingest/entry.py). */
+export type LogLevel = "trace" | "debug" | "info" | "warn" | "error" | "critical" | "fatal";
+
+/** Where a service sits in a request's path, shallow → deep. */
+export type ServiceRole =
+  | "frontend"
+  | "proxy"
+  | "gateway"
+  | "backend"
+  | "worker"
+  | "queue"
+  | "cache"
+  | "db"
+  | "external"
+  | "unknown";
+
+/** A log format the ingest phase has a parser for. */
+export type LogFormat =
+  | "plain"
+  | "json"
+  | "logfmt"
+  | "clf"
+  | "syslog"
+  | "syslog5424"
+  | "postgres"
+  | "cri";
+
+/**
+ * How an entry's timestamp was arrived at. Worth surfacing: an "assumed" or
+ * "carried" time is not a measurement, and a timeline built from them can
+ * mislead.
+ */
+export type TimeSource = "offset" | "zone" | "assumed" | "carried" | "none";
+
+/** One log event — not one line; a stack trace folds into its entry. */
 export interface NormalizedLogEntry {
+  file_id: string;
+  line_no: number;
+  service: string;
+  role: ServiceRole;
+  /** ISO-8601 UTC, or "" when the entry has no usable timestamp. */
   timestamp: string;
-  level: string;
-  source: string;
+  time_source: TimeSource;
+  level: LogLevel;
   message: string;
-  metadata: Record<string, unknown>;
+  /** Real trace context, only ever read from the log itself. */
+  trace_id: string | null;
+  span_id: string | null;
+  parent_span_id: string | null;
+  /** Structured fields the format supplied natively. */
+  attributes: Record<string, unknown>;
+  /** Explicit join keys — request IDs, PIDs, session IDs. */
+  correlation_keys: Record<string, string>;
   raw: string;
+  /** Set by the enrich phase (Drain3 template mining). */
+  template_id: string | null;
+  /** Set by correlation. Inferred grouping — never a real trace ID. */
+  flow_id: string | null;
+}
+
+/** One file in an ingest request. */
+export interface IngestFileIn {
+  name: string;
+  content: string;
+  /** Naming the service turns off per-line service inference for this file. */
+  service?: string | null;
+  role?: ServiceRole;
+  /** Overrides detection. Omit to sniff it. */
+  format?: LogFormat | null;
+  /** IANA zone, for timestamps that carry no offset. */
+  timezone?: string | null;
+  offset_seconds?: number;
+}
+
+export interface RedactionOptions {
+  enabled?: boolean;
+  /** Off by default — an IP is a correlation key more often than it is PII. */
+  redact_ips?: boolean;
+  redact_cards?: boolean;
+  disabled_rules?: string[];
+}
+
+/** What ingest made of one file — the per-file row in the upload UI. */
+export interface IngestFileReport {
+  file_id: string;
+  name: string;
+  service: string;
+  role: ServiceRole;
+  format: LogFormat;
+  /** 0–1. Show it: detection is a guess, and the user can override. */
+  format_confidence: number;
+  /** For format "json", which producer wrote it. */
+  flavor: string | null;
+  format_overridden: boolean;
+  entry_count: number;
+  line_count: number;
+  bytes: number;
+  first_timestamp: string | null;
+  last_timestamp: string | null;
+  unresolved_timestamps: number;
+  applied_offset_seconds: number;
+  /** Set when this file's window sits clear of every other file's. */
+  skew_warning: string | null;
+  dropped_lines: number;
+  with_trace_id: number;
+  with_correlation_key: number;
+}
+
+export interface RedactionSummary {
+  total: number;
+  entries_affected: number;
+  /** Rule name → count, for the "before you send this" list. */
+  counts: Record<string, number>;
+}
+
+export interface IngestPreview {
+  files: IngestFileReport[];
+  entry_count: number;
+  dropped_lines: number;
+  /** 0–1. At 1 the next phase renders; at 0 every link must be inferred. */
+  trace_coverage: number;
+  /** 0–1. The fallback signal when trace_coverage is 0. */
+  correlation_coverage: number;
+  first_timestamp: string | null;
+  last_timestamp: string | null;
+  skew_suspected: boolean;
+  redaction: RedactionSummary;
+  sample: NormalizedLogEntry[];
 }
 
 export interface LogPull {

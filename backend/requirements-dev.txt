@@ -1,0 +1,13 @@
+# Test and lint tooling. Not installed into the runtime image — see Dockerfile,
+# which installs requirements.txt only.
+#
+#   pip install -r requirements.txt -r requirements-dev.txt
+#   pytest
+#   ruff check .
+
+-r requirements.txt
+
+pytest
+# TestClient drives the FastAPI app in-process for the route tests.
+httpx
+ruff

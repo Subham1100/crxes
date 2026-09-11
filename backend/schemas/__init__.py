@@ -15,6 +15,16 @@ from schemas.analyses import (
 from schemas.auth import Credentials, LoginRequest, SignupRequest, UserOut
 from schemas.costs import CostEstimateOut, EstimateRequest, ModelCostOut, StageCostOut
 from schemas.health import HealthOut
+from schemas.ingest import (
+    FileIn,
+    FileReportOut,
+    IngestPreviewOut,
+    IngestRequest,
+    LogFormat,
+    RedactionOptions,
+    RedactionOut,
+    Role,
+)
 
 __all__ = [
     "AnalysisDetailOut",
@@ -23,12 +33,20 @@ __all__ = [
     "CostEstimateOut",
     "Credentials",
     "EstimateRequest",
+    "FileIn",
+    "FileReportOut",
     "HealthOut",
+    "IngestPreviewOut",
+    "IngestRequest",
+    "LogFormat",
     "LoginRequest",
     "ModelCostOut",
     "PredictedBug",
     "PredictionOut",
     "PredictorOutput",
+    "RedactionOptions",
+    "RedactionOut",
+    "Role",
     "Severity",
     "StageCostOut",
     "SignupRequest",
