@@ -80,3 +80,34 @@ class NoLogLines(HTTPException):
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="No log lines found in that input",
         )
+
+
+class TooManyFilesUploaded(HTTPException):
+    def __init__(self, count: int) -> None:
+        from ingest.limits import MAX_FILES
+
+        super().__init__(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"{count} files exceeds the {MAX_FILES}-file limit",
+        )
+
+
+class FileTooLarge(HTTPException):
+    def __init__(self, name: str, size: int) -> None:
+        from ingest.limits import MAX_UPLOAD_BYTES
+
+        super().__init__(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=(
+                f"{name} is {size / 1_000_000:.1f}MB, over the "
+                f"{MAX_UPLOAD_BYTES / 1_000_000:.0f}MB per-file limit"
+            ),
+        )
+
+
+class UnreadableUpload(HTTPException):
+    def __init__(self, name: str) -> None:
+        super().__init__(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"{name} could not be read as text",
+        )

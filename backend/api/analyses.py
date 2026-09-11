@@ -18,10 +18,12 @@ from sqlalchemy.orm import selectinload
 from agents import AGENTS, run_pipeline
 from api.deps import get_current_user
 from config import settings
-from core import cost, logs, tokens
+from core import cost, tokens
 from db.models import Analysis, LogPull, Prediction, Source, User
 from db.session import get_db
 from exceptions import AnalysisNotFound, NoLogLines, PipelineError
+from ingest import ingest_text, to_prompt
+from ingest.limits import MAX_PASTE_LINES
 from schemas.analyses import AnalysisDetailOut, AnalysisOut, AnalyzeRequest
 from schemas.costs import CostEstimateOut, EstimateRequest
 
@@ -91,23 +93,23 @@ async def estimate_cost(
 ) -> CostEstimateOut:
     """Price a paste before running it.
 
-    Parses through the same `logs.normalize` / `logs.to_prompt` path the real
-    run uses, so the estimate is built from the exact text the parser would be
-    sent — truncation of an oversized paste included.
+    Runs the same ingest phase the real run does, so the estimate is built
+    from the exact text the agents would be sent — redaction and the
+    truncation of an oversized paste included.
     """
-    entries, dropped = logs.normalize(body.logs)
-    if not entries:
+    result = ingest_text(body.logs)
+    if not result.entries:
         raise NoLogLines()
 
-    prompt = logs.to_prompt(entries)
+    prompt = to_prompt(result.entries)
     log_tokens, counted = await tokens.count_tokens(prompt)
     estimate = cost.estimate_pipeline_tokens(log_tokens, counted=counted)
 
     return CostEstimateOut.of(
         estimate,
         cost.price_catalog(estimate),
-        log_line_count=len(entries),
-        dropped_lines=dropped,
+        log_line_count=result.entry_count,
+        dropped_lines=result.dropped_lines,
         raw_size_bytes=len(body.logs.encode()),
         prompt_chars=len(prompt),
     )
@@ -119,16 +121,19 @@ async def create_analysis(
     user: Annotated[User, Depends(get_current_user)],
     db: AsyncSession = Depends(get_db),
 ) -> AnalysisDetailOut:
-    entries, dropped = logs.normalize(body.logs)
-    if not entries:
+    result = ingest_text(body.logs)
+    if not result.entries:
         raise NoLogLines()
 
+    first, last = result.time_range()
     source = await _manual_source(db, user)
     log_pull = LogPull(
         source_id=source.id,
-        log_count=len(entries),
-        normalized_logs=entries,
+        log_count=result.entry_count,
+        normalized_logs=result.to_dicts(),
         raw_size_bytes=len(body.logs.encode()),
+        time_range_start=first,
+        time_range_end=last,
     )
     db.add(log_pull)
     await db.flush()
@@ -139,7 +144,7 @@ async def create_analysis(
         log_pull_id=log_pull.id,
         status="running",
         current_agent=0,
-        log_line_count=len(entries),
+        log_line_count=result.entry_count,
     )
     db.add(analysis)
     await db.commit()
@@ -153,7 +158,7 @@ async def create_analysis(
 
     started = time.monotonic()
     try:
-        result = await run_pipeline(logs.to_prompt(entries), on_agent_done=checkpoint)
+        run = await run_pipeline(to_prompt(result.entries), on_agent_done=checkpoint)
     except PipelineError as exc:
         analysis.status = "failed"
         analysis.error_message = str(exc)
@@ -165,15 +170,17 @@ async def create_analysis(
         # and the client renders the error from the row.
         return AnalysisDetailOut.of(await _load(db, user, analysis.id))
 
-    for row in result.predictions:
+    for row in run.predictions:
         db.add(Prediction(analysis_id=analysis.id, **row))
 
     analysis.status = "done"
     analysis.current_agent = len(AGENTS)
-    _record_cost(analysis, result.usage())
+    _record_cost(analysis, run.usage())
     analysis.duration_ms = int((time.monotonic() - started) * 1000)
-    if dropped:
-        analysis.error_message = f"{dropped:,} lines past the {logs.MAX_LINES:,}-line cap were dropped"
+    if result.dropped_lines:
+        analysis.error_message = (
+            f"{result.dropped_lines:,} lines past the {MAX_PASTE_LINES:,}-line cap were dropped"
+        )
     await db.commit()
 
     return AnalysisDetailOut.of(await _load(db, user, analysis.id))
